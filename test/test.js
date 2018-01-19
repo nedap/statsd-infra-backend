@@ -154,5 +154,43 @@ describe('New Relic Infrastructure StatsD Backend', function() {
       emitter.emit('flush', timestamp, metrics);
       assert.equal(httpserver.isDone(), true);
     });
+
+    it('valid matching rules with tags in metric', function(done) {
+      const emitter = new events.EventEmitter();
+      const config = Object.assign({}, defaultConfig);
+      config.newrelic.metricsLimit = 150;
+      config.newrelic.rules = [{
+        matchExpression: '.*redis.*',
+        metricSchema: '{app}.{service}.{metricName}',
+        entityType: 'Redis Cluster',
+        entityName: 'Production Host1',
+        eventType: 'RedisSample'
+      }];
+      const metrics = {
+        gauges: { 'myapp.redis.my_gauge': 1 },
+        counters: { 'myapp.redis.my_counter#t1:v1': 5, 'myapp.redis.my_counter': 10,},
+        counter_rates: { 'myapp.redis.my_counter': 1},
+        timer_data: {
+          'myapp.redis.my_timer': {
+            sum: 10,
+            mean: 10
+          }
+        }
+      };
+      const expected = defaultIntegration;
+      expected.metrics = [{event_type: 'RedisSample', app: 'myapp', service: 'redis', "label.t1": "v1", 'my_counter': 5},
+        {event_type: 'RedisSample', app: 'myapp', service: 'redis', 'my_gauge': 1, 'my_counter': 10, 'my_counterPerSecond': 1, 'my_timer.sum': 10, 'my_timer.mean': 10}
+        ];
+
+      const httpserver = nock('http://localhost:9070')
+        .post('/v1/data')
+        .reply(204, function(uri, requestBody) {
+          assert.deepEqual(requestBody, expected);
+          done();
+        });
+      nri.init(null, config, emitter, util);
+      emitter.emit('flush', timestamp, metrics);
+      assert.equal(httpserver.isDone(), true);
+    });
   });
 });
